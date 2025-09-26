@@ -7,8 +7,14 @@ class RunningTracker {
         this.totalDistance = 0;
         this.claimedArea = 0;
         
+        this.map = null;
+        this.routePolyline = null;
+        this.areaPolygon = null;
+        this.startMarker = null;
+        this.currentMarker = null;
+        
         this.initializeElements();
-        this.initializeMap();
+        this.initializeGoogleMap();
         this.setupEventListeners();
     }
 
@@ -22,24 +28,53 @@ class RunningTracker {
         this.mapElement = document.getElementById('map');
     }
 
-    initializeMap() {
-        // Initialize Leaflet map
-        this.map = L.map('map').setView([51.505, -0.09], 13);
+    initializeGoogleMap() {
+        // Default center (will be updated with user's location)
+        const defaultCenter = { lat: 51.505, lng: -0.09 };
         
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(this.map);
+        // Initialize Google Map
+        this.map = new google.maps.Map(this.mapElement, {
+            zoom: 13,
+            center: defaultCenter,
+            mapTypeId: 'terrain',
+            styles: [
+                {
+                    featureType: "poi",
+                    elementType: "labels",
+                    stylers: [{ visibility: "off" }]
+                }
+            ]
+        });
 
-        // Create layers
-        this.routeLayer = L.layerGroup().addTo(this.map);
-        this.areaLayer = L.layerGroup().addTo(this.map);
-        
         // Try to center on user's location
         if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition((position) => {
-                const { latitude, longitude } = position.coords;
-                this.map.setView([latitude, longitude], 16);
-            });
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const userLocation = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+                    this.map.setCenter(userLocation);
+                    this.map.setZoom(16);
+                    
+                    // Add a marker for current location
+                    new google.maps.Marker({
+                        position: userLocation,
+                        map: this.map,
+                        title: 'Your current location',
+                        icon: {
+                            url: 'data:image/svg+xml;base64,' + btoa(`
+                                <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                                    <circle cx="10" cy="10" r="8" fill="#4285F4" stroke="white" stroke-width="2"/>
+                                </svg>
+                            `)
+                        }
+                    });
+                },
+                (error) => {
+                    console.log('Error getting location:', error);
+                }
+            );
         }
     }
 
@@ -85,13 +120,19 @@ class RunningTracker {
         }
 
         this.calculateClaimedArea();
+        this.updateMap();
         this.updateUI();
         console.log('Run stopped!');
     }
 
     updatePosition(position) {
         const { latitude, longitude, accuracy } = position.coords;
-        const newLocation = { lat: latitude, lng: longitude, accuracy, timestamp: Date.now() };
+        const newLocation = { 
+            lat: latitude, 
+            lng: longitude, 
+            accuracy, 
+            timestamp: Date.now() 
+        };
 
         // Add to locations array
         this.locations.push(newLocation);
@@ -99,7 +140,10 @@ class RunningTracker {
         // Calculate distance from previous point
         if (this.locations.length > 1) {
             const prevLocation = this.locations[this.locations.length - 2];
-            const distance = this.calculateDistance(prevLocation, newLocation);
+            const distance = google.maps.geometry.spherical.computeDistanceBetween(
+                new google.maps.LatLng(prevLocation.lat, prevLocation.lng),
+                new google.maps.LatLng(newLocation.lat, newLocation.lng)
+            );
             this.totalDistance += distance;
         }
 
@@ -107,79 +151,107 @@ class RunningTracker {
         this.updateUI();
     }
 
-    calculateDistance(loc1, loc2) {
-        const R = 6371e3; // Earth's radius in meters
-        const φ1 = loc1.lat * Math.PI / 180;
-        const φ2 = loc2.lat * Math.PI / 180;
-        const Δφ = (loc2.lat - loc1.lat) * Math.PI / 180;
-        const Δλ = (loc2.lng - loc1.lng) * Math.PI / 180;
-
-        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                Math.cos(φ1) * Math.cos(φ2) *
-                Math.sin(Δλ/2) * Math.sin(Δλ/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-
-        return R * c;
-    }
-
     calculateClaimedArea() {
         if (this.locations.length < 3) return 0;
 
-        // Simple polygon area calculation using shoelace formula
-        let area = 0;
-        const n = this.locations.length;
-
-        for (let i = 0; i < n; i++) {
-            const j = (i + 1) % n;
-            area += this.locations[i].lng * this.locations[j].lat;
-            area -= this.locations[j].lng * this.locations[i].lat;
-        }
-
-        this.claimedArea = Math.abs(area) * 111319.9 * 111319.9 / 2; // Convert to square meters
+        // Use Google Maps geometry library for accurate area calculation
+        const path = this.locations.map(loc => 
+            new google.maps.LatLng(loc.lat, loc.lng)
+        );
+        
+        this.claimedArea = Math.abs(google.maps.geometry.spherical.computeArea(path));
         return this.claimedArea;
     }
 
     updateMap() {
-        // Clear previous layers
-        this.routeLayer.clearLayers();
-        this.areaLayer.clearLayers();
+        // Clear previous map elements
+        if (this.routePolyline) this.routePolyline.setMap(null);
+        if (this.areaPolygon) this.areaPolygon.setMap(null);
+        if (this.currentMarker) this.currentMarker.setMap(null);
 
-        // Draw route
+        // Draw route polyline
         if (this.locations.length > 1) {
-            const latLngs = this.locations.map(loc => [loc.lat, loc.lng]);
-            const polyline = L.polyline(latLngs, { color: 'blue', weight: 5 }).addTo(this.routeLayer);
+            const path = this.locations.map(loc => 
+                new google.maps.LatLng(loc.lat, loc.lng)
+            );
+            
+            this.routePolyline = new google.maps.Polyline({
+                path: path,
+                geodesic: true,
+                strokeColor: '#4285F4',
+                strokeOpacity: 1.0,
+                strokeWeight: 4,
+                map: this.map
+            });
         }
 
         // Draw area polygon if we have a closed route
         if (this.locations.length >= 3 && !this.isRunning) {
-            const latLngs = this.locations.map(loc => [loc.lat, loc.lng]);
-            const polygon = L.polygon(latLngs, { 
-                color: 'red', 
-                fillColor: '#f03', 
-                fillOpacity: 0.5 
-            }).addTo(this.areaLayer);
+            const path = this.locations.map(loc => 
+                new google.maps.LatLng(loc.lat, loc.lng)
+            );
+            
+            this.areaPolygon = new google.maps.Polygon({
+                paths: path,
+                strokeColor: '#EA4335',
+                strokeOpacity: 0.8,
+                strokeWeight: 3,
+                fillColor: '#EA4335',
+                fillOpacity: 0.35,
+                map: this.map
+            });
         }
 
         // Add markers for start and current position
         if (this.locations.length > 0) {
             const startLoc = this.locations[0];
-            L.marker([startLoc.lat, startLoc.lng])
-                .addTo(this.routeLayer)
-                .bindPopup('Start Point')
-                .openPopup();
+            
+            // Start marker (only once)
+            if (!this.startMarker) {
+                this.startMarker = new google.maps.Marker({
+                    position: new google.maps.LatLng(startLoc.lat, startLoc.lng),
+                    map: this.map,
+                    title: 'Start Point',
+                    icon: {
+                        url: 'data:image/svg+xml;base64,' + btoa(`
+                            <svg width="25" height="25" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12.5" cy="12.5" r="10" fill="#34A853" stroke="white" stroke-width="2"/>
+                            </svg>
+                        `)
+                    }
+                });
+            }
 
+            // Current position marker (updates in real-time)
             if (this.isRunning) {
                 const currentLoc = this.locations[this.locations.length - 1];
-                L.marker([currentLoc.lat, currentLoc.lng])
-                    .addTo(this.routeLayer)
-                    .bindPopup('Current Position');
+                this.currentMarker = new google.maps.Marker({
+                    position: new google.maps.LatLng(currentLoc.lat, currentLoc.lng),
+                    map: this.map,
+                    title: 'Current Position',
+                    icon: {
+                        url: 'data:image/svg+xml;base64,' + btoa(`
+                            <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="10" cy="10" r="8" fill="#4285F4" stroke="white" stroke-width="2"/>
+                            </svg>
+                        `)
+                    }
+                });
             }
         }
     }
 
     clearMap() {
-        this.routeLayer.clearLayers();
-        this.areaLayer.clearLayers();
+        if (this.routePolyline) this.routePolyline.setMap(null);
+        if (this.areaPolygon) this.areaPolygon.setMap(null);
+        if (this.startMarker) {
+            this.startMarker.setMap(null);
+            this.startMarker = null;
+        }
+        if (this.currentMarker) {
+            this.currentMarker.setMap(null);
+            this.currentMarker = null;
+        }
     }
 
     updateUI() {
@@ -187,8 +259,12 @@ class RunningTracker {
         this.distanceElement.textContent = (this.totalDistance / 1000).toFixed(2) + ' km';
         this.areaElement.textContent = (this.claimedArea / 10000).toFixed(2) + ' hectares';
         
+        // Enable/disable buttons
+        this.startButton.disabled = this.isRunning;
+        this.stopButton.disabled = !this.isRunning;
+        
         if (this.startTime) {
-            const currentTime = this.isRunning ? new Date() : this.startTime;
+            const currentTime = this.isRunning ? new Date() : new Date();
             const elapsed = Math.floor((currentTime - this.startTime) / 1000);
             const minutes = Math.floor(elapsed / 60);
             const seconds = elapsed % 60;

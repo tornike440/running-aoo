@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Running Territory Tracker</title>
     
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyD0Ytup9D3m7RRSplLOozCzFj9ajPPRq_k&libraries=geometry"></script>
     
     <style>
         * {
@@ -158,24 +158,37 @@
         .instructions li {
             margin: 5px 0;
         }
+
+        .api-warning {
+            background: #f8d7da;
+            border-left: 5px solid #dc3545;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            color: #721c24;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🏃 Running Territory Tracker</h1>
-            <p>Track your run and claim your territory!</p>
+            <p>Track your run and claim your territory with Google Maps!</p>
         </div>
 
         <div class="content">
             <div class="left-panel">
+                <div class="api-warning">
+                    <strong>Important:</strong> You need a Google Maps API key. Get one at <a href="https://developers.google.com/maps/documentation/javascript/get-api-key" target="_blank">Google Cloud Console</a> and replace "YOUR_GOOGLE_MAPS_API_KEY" in the code.
+                </div>
+
                 <div class="instructions">
                     <h3>How to Use:</h3>
                     <ul>
                         <li>Click "Start Run" to begin tracking your location</li>
                         <li>Run any closed shape (circle, rectangle, etc.)</li>
                         <li>Click "Stop Run" to calculate your claimed territory</li>
-                        <li>Your route and claimed area will be displayed on the map</li>
+                        <li>Your route and claimed area will be displayed on Google Maps</li>
                     </ul>
                 </div>
 
@@ -215,8 +228,6 @@
         </div>
     </div>
 
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- Our main script -->
     <script src="run-sample.js"></script>
 </body>

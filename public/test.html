@@ -1,180 +1,223 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Territory Tracker</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    html,body,#map { height: 100%; margin: 0; padding: 0; }
-    #controls { position: absolute; left: 12px; top: 12px; z-index: 5;
-                background: rgba(255,255,255,0.95); padding: 8px; border-radius: 6px; }
-    button { margin: 4px; padding: 8px 10px; }
-  </style>
-  <!-- Load Turf (for polygon area) -->
-  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
-  <script src="https://unpkg.com/h3-js@4.1.2/dist/h3-js.umd.js"></script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyD0Ytup9D3m7RRSplLOozCzFj9ajPPRq_k"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Running Territory Tracker</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 30px;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .stats-panel {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            border-left: 5px solid #3498db;
+        }
+
+        .stat-item {
+            margin: 15px 0;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .stat-label {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.5em;
+            color: #3498db;
+            font-weight: bold;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        button {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            flex: 1;
+        }
+
+        #startButton {
+            background: #27ae60;
+            color: white;
+        }
+
+        #startButton:hover {
+            background: #219a52;
+            transform: translateY(-2px);
+        }
+
+        #stopButton {
+            background: #e74c3c;
+            color: white;
+        }
+
+        #stopButton:hover {
+            background: #c0392b;
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #map {
+            height: 500px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .instructions {
+            background: #fff3cd;
+            border-left: 5px solid #ffc107;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+
+        .instructions h3 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .instructions ul {
+            list-style-position: inside;
+            color: #856404;
+        }
+
+        .instructions li {
+            margin: 5px 0;
+        }
+    </style>
 </head>
 <body>
-  <div id="controls">
-    <button id="startBtn">Start Run</button>
-    <button id="stopBtn" disabled>Stop Run</button>
-    <span id="status">idle</span>
-  </div>
-  <div id="map"></div>
+    <div class="container">
+        <div class="header">
+            <h1>🏃 Running Territory Tracker</h1>
+            <p>Track your run and claim your territory!</p>
+        </div>
 
-<script>
-(() => {
-  const H3_RES = 9;         // must match backend resolution
-  const CLOSE_RADIUS_M = 20; // meters to consider "closed"
-  const MIN_RUN_SECONDS = 60;
-  const MIN_POLY_AREA_M2 = 50; // minimal polygon area to consider valid
+        <div class="content">
+            <div class="left-panel">
+                <div class="instructions">
+                    <h3>How to Use:</h3>
+                    <ul>
+                        <li>Click "Start Run" to begin tracking your location</li>
+                        <li>Run any closed shape (circle, rectangle, etc.)</li>
+                        <li>Click "Stop Run" to calculate your claimed territory</li>
+                        <li>Your route and claimed area will be displayed on the map</li>
+                    </ul>
+                </div>
 
-  let map, watchId = null;
-  let path = []; // array of [lat, lng]
-  let polyline, polygonOverlay;
-  let runStart = null;
-  let startMarker = null;
+                <div class="stats-panel">
+                    <h2>Run Statistics</h2>
+                    
+                    <div class="stat-item">
+                        <div class="stat-label">Status</div>
+                        <div class="stat-value" id="status">Ready</div>
+                    </div>
 
-  function initMap() {
-    map = new google.maps.Map(document.getElementById('map'), {
-      center: { lat: 41.7078, lng: 44.8026 }, // default center
-      zoom: 15,
-    });
-    polyline = new google.maps.Polyline({ map, path: [], strokeColor: '#FF0000', strokeWeight: 4 });
-  }
+                    <div class="stat-item">
+                        <div class="stat-label">Distance</div>
+                        <div class="stat-value" id="distance">0.00 km</div>
+                    </div>
 
-  function toLatLngLiteral(pt) { return { lat: pt[0], lng: pt[1] }; }
+                    <div class="stat-item">
+                        <div class="stat-label">Claimed Area</div>
+                        <div class="stat-value" id="area">0.00 hectares</div>
+                    </div>
 
-  function distanceMeters(a, b) {
-    // haversine
-    const R = 6371000;
-    const toRad = v => v * Math.PI / 180;
-    const dLat = toRad(b[0]-a[0]);
-    const dLon = toRad(b[1]-a[1]);
-    const lat1 = toRad(a[0]), lat2 = toRad(b[0]);
-    const hav = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
-    return 2*R*Math.asin(Math.sqrt(hav));
-  }
+                    <div class="stat-item">
+                        <div class="stat-label">Time</div>
+                        <div class="stat-value" id="time">00:00</div>
+                    </div>
 
-  function updateMap() {
-    polyline.setPath(path.map(toLatLngLiteral));
-    if (path.length > 0) {
-      map.panTo(toLatLngLiteral(path[path.length-1]));
-    }
-    if (!startMarker && path.length > 0) {
-      startMarker = new google.maps.Marker({ map, position: toLatLngLiteral(path[0]), label: 'S' });
-    }
-  }
+                    <div class="controls">
+                        <button id="startButton">Start Run</button>
+                        <button id="stopButton" disabled>Stop Run</button>
+                    </div>
+                </div>
+            </div>
 
-  async function sendRunPayload(user_id = 'demo_user') {
-    const payload = { user_id, points: path.map(p => ({ latitude: p[0], longitude: p[1], timestamp: Date.now() })) };
-    try {
-      const r = await fetch('/runs', {
-        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
-      });
-      const j = await r.json();
-      console.log('runs response', j);
-    } catch (e) { console.error(e); }
-  }
+            <div class="right-panel">
+                <div id="map"></div>
+            </div>
+        </div>
+    </div>
 
-  async function sendPolygonCapture(user_id = 'demo_user') {
-    // polygon coordinates in [lng, lat] order for geojson
-    const coords = path.map(p => [p[1], p[0]]);
-    const geojson = { type: 'Polygon', coordinates: [ coords ] };
-    try {
-      const r = await fetch('/capturePolygon', {
-        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ user_id, polygon: geojson })
-      });
-      const j = await r.json();
-      console.log('capturePolygon response', j);
-    } catch(e) { console.error(e); }
-  }
-
-  function maybeCloseLoop() {
-    if (path.length < 4) return false;
-    const now = Date.now();
-    const secs = (now - runStart) / 1000;
-    if (secs < MIN_RUN_SECONDS) return false;
-    const distToStart = distanceMeters(path[path.length-1], path[0]);
-    if (distToStart > CLOSE_RADIUS_M) return false;
-
-    // Compute polygon area with turf (expects [lng,lat])
-    const poly = turf.polygon([path.map(p => [p[1], p[0]])]);
-    const area = turf.area(poly); // in square meters
-    if (area < MIN_POLY_AREA_M2) return false;
-
-    return true;
-  }
-
-  function showCapturedPolygon() {
-    if (polygonOverlay) polygonOverlay.setMap(null);
-    const polygon = new google.maps.Polygon({
-      paths: path.map(toLatLngLiteral),
-      map,
-      strokeColor: '#00AA00',
-      fillColor: '#00AA00',
-      fillOpacity: 0.25
-    });
-    polygonOverlay = polygon;
-  }
-
-  function startRun() {
-    path = [];
-    runStart = Date.now();
-    document.getElementById('status').textContent = 'running';
-    document.getElementById('startBtn').disabled = true;
-    document.getElementById('stopBtn').disabled = false;
-
-    if (!navigator.geolocation) {
-      alert('Geolocation not available.');
-      return;
-    }
-
-    watchId = navigator.geolocation.watchPosition(pos => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      path.push([lat, lng]);
-      updateMap();
-
-      if (maybeCloseLoop()) {
-        // close loop
-        navigator.geolocation.clearWatch(watchId);
-        watchId = null;
-        document.getElementById('status').textContent = 'loop detected - capturing';
-        showCapturedPolygon();
-        // send run and polygon
-        sendRunPayload();
-        sendPolygonCapture();
-        document.getElementById('startBtn').disabled = false;
-        document.getElementById('stopBtn').disabled = true;
-      }
-    }, err => {
-      console.error(err);
-      alert('Geolocation error: ' + err.message);
-    }, {
-      enableHighAccuracy: true, maximumAge: 1000, timeout: 10000
-    });
-  }
-
-  function stopRunManual() {
-    if (watchId) {
-      navigator.geolocation.clearWatch(watchId);
-      watchId = null;
-      document.getElementById('status').textContent = 'stopped';
-      // optionally send partial run:
-      sendRunPayload();
-      document.getElementById('startBtn').disabled = false;
-      document.getElementById('stopBtn').disabled = true;
-    }
-  }
-
-  window.addEventListener('load', () => {
-    initMap();
-    document.getElementById('startBtn').addEventListener('click', startRun);
-    document.getElementById('stopBtn').addEventListener('click', stopRunManual);
-  });
-})();
-</script>
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Our main script -->
+    <script src="run-sample.js"></script>
 </body>
 </html>
